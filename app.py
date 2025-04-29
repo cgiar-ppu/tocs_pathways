@@ -51,12 +51,25 @@ def main():
         result_types,
         default=result_types[:3]
     )
+
+    # Filter by INIT
+    sources = sorted(df['Source_File'].unique())
+    selected_sources = st.sidebar.multiselect(
+        "Filter by INIT",
+        sources,
+        default=[],  # No default selection
+        help="Select one or more INITs to filter the results"
+    )
     
     # Apply filters
     filtered_df = df[
         (df['Topic'] == selected_topic) &
         (df['Result Type'].isin(selected_result_type))
     ]
+
+    # Apply source filter if any sources are selected
+    if selected_sources:
+        filtered_df = filtered_df[filtered_df['Source_File'].isin(selected_sources)]
     
     # Main content area - using columns for layout
     col1, col2 = st.columns([3, 1])
@@ -105,7 +118,7 @@ def main():
                 "Type": st.column_config.TextColumn("Indicator Type", width="medium"),
                 "Unit of measurement": st.column_config.TextColumn("Unit", width="medium"),
                 "WP Title": st.column_config.TextColumn("Work Package", width="medium"),
-                "Source_File": st.column_config.TextColumn("Source", width="medium")
+                "Source_File": st.column_config.TextColumn("INIT", width="medium")
             }
         )
     
@@ -116,8 +129,9 @@ def main():
         
         1. Use the sidebar to select a specific cluster
         2. Filter by Result Types if needed
-        3. Explore the detailed results in the table
-        4. Scroll down to see overall statistics
+        3. Filter by INITs if needed
+        4. Explore the detailed results in the table
+        5. Scroll down to see overall statistics
         """)
     
     # Clusters Overview Section
