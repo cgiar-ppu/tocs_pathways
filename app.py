@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-#
+from datetime import datetime
 
 # Set page config
 st.set_page_config(
@@ -10,228 +10,232 @@ st.set_page_config(
     layout="wide"
 )
 
-# Load data
-@st.cache_data
-def load_data():
-    df = pd.read_excel('outputs/ToCs_Clustered_2025-04-29T13-02_export.xlsx')
-    cluster_names = pd.read_csv('outputs/ToCs_PathwaysNames.csv')
-    return df, cluster_names
+# Use session state to maintain selected tab
+if 'current_tab' not in st.session_state:
+    st.session_state.current_tab = 0
 
-# Main function
+# Load data with cache bypass
+def load_data():
+    # Add timestamp to force reload when needed
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    try:
+        df = pd.read_excel('outputs/ToCs_Clustered_with_Topics.xlsx')
+        cluster_names = pd.read_csv('outputs/ToCs_PathwaysNames.csv')
+        
+        # Handle NaN and type conversions immediately
+        df['Topic_Name'] = df['Topic_Name'].fillna("Uncategorized")
+        df['Topic'] = df['Topic'].fillna(-1).astype(int)
+        
+        return df, cluster_names
+    except Exception as e:
+        st.error(f"Error loading data: {str(e)}")
+        return None, None
+
 def main():
     st.title("ToCs Pathways Explorer")
     
-    # Load data
-    df, cluster_names = load_data()
-    
-    # Create a mapping of topic to cluster name and keywords
-    cluster_info = dict(zip(
-        cluster_names['Topic'],
-        zip(cluster_names['Cluster_Name'], cluster_names['Top Keywords'])
-    ))
-    
-    # Calculate total indicators across all valid clusters
-    total_indicators = df[
-        (df['Topic'] != -1) & 
-        (df['Indicator'].notna())
-    ]['Indicator'].nunique()
-    
-    # Sidebar
-    st.sidebar.header("Filters")
-    
-    # Filter by Topic/Cluster with names
-    topics = sorted([t for t in df['Topic'].unique() if t != -1])  # Exclude cluster -1
-    topic_options = {topic: f"Cluster {topic}: {cluster_info[topic][0] if topic in cluster_info else 'Unnamed'}" 
-                    for topic in topics}
-    
-    selected_topic = st.sidebar.selectbox(
-        "Select Cluster/Topic",
-        topics,
-        format_func=lambda x: topic_options[x]
-    )
-    
-    # Filter by Result Type
-    result_types = sorted(df['Result Type'].unique())
-    selected_result_type = st.sidebar.multiselect(
-        "Filter by Result Type",
-        result_types,
-        default=result_types[:3]
-    )
-
-    # Filter by INIT
-    sources = sorted(df['Source_File'].unique())
-    selected_sources = st.sidebar.multiselect(
-        "Filter by INIT",
-        sources,
-        default=[],  # No default selection
-        help="Select one or more INITs to filter the results"
-    )
-
-    # Filter by Indicator
-    indicators = sorted(df['Indicator'].dropna().unique())
-    selected_indicators = st.sidebar.multiselect(
-        "Filter by Indicator",
-        indicators,
-        default=[],  # No default selection
-        help="Select one or more indicators to filter the results"
-    )
-    
-    # Apply filters
-    filtered_df = df[
-        (df['Topic'] == selected_topic) &
-        (df['Result Type'].isin(selected_result_type))
-    ]
-
-    # Apply source filter if any sources are selected
-    if selected_sources:
-        filtered_df = filtered_df[filtered_df['Source_File'].isin(selected_sources)]
-
-    # Apply indicator filter if any indicators are selected
-    if selected_indicators:
-        filtered_df = filtered_df[filtered_df['Indicator'].isin(selected_indicators)]
-    
-    # Main content area - using columns for layout
-    col1, col2 = st.columns([3, 1])
-    
-    with col1:
-        # Display cluster name and keywords
-        if selected_topic in cluster_info:
-            cluster_name, keywords = cluster_info[selected_topic]
-            st.header(f"Cluster {selected_topic}: {cluster_name}")
-            st.markdown(f"**Top Keywords:** {keywords}")
-        else:
-            st.header(f"Cluster {selected_topic}")
+    try:
+        # Load data
+        df, cluster_names = load_data()
+        if df is None or cluster_names is None:
+            st.error("Failed to load data. Please check the data files.")
+            return
         
-        # Cluster Statistics
-        st.subheader("Cluster Statistics")
-        stats_cols = st.columns(6)  # Increased number of columns
+        # Create a mapping of topic to cluster name and keywords
+        cluster_info = dict(zip(
+            cluster_names['Topic'],
+            zip(cluster_names['Cluster_Name'], cluster_names['Top Keywords'])
+        ))
         
-        # Calculate indicators in current cluster (before additional filters)
-        cluster_indicators = df[
-            (df['Topic'] == selected_topic) & 
+        # Calculate totals
+        total_indicators = df[
+            (df['Topic'] != -1) & 
             (df['Indicator'].notna())
         ]['Indicator'].nunique()
         
-        with stats_cols[0]:
-            st.metric("Total Entries", len(filtered_df))
-        with stats_cols[1]:
-            st.metric("Total INITs", filtered_df['Source_File'].nunique())
-        with stats_cols[2]:
-            st.metric("Result Types", filtered_df['Result Type'].nunique())
-        with stats_cols[3]:
-            st.metric("Work Packages", filtered_df['WP Title'].nunique())
-        with stats_cols[4]:
-            st.metric("Indicators in Cluster", cluster_indicators)
-        with stats_cols[5]:
-            st.metric("Total Indicators (All Clusters)", total_indicators)
+        total_indicator_topics = df['Topic_Name'].nunique()
         
-        # Result Statements Table
-        st.subheader("Result Statements")
-        st.dataframe(
-            filtered_df[[
+        # Sidebar
+        st.sidebar.header("Filters")
+        
+        # Add tabs for different views with session state
+        tabs = ["Results Statement Clusters", "Indicator Topics"]
+        current_tab = st.radio("Select View", tabs, index=st.session_state.current_tab, horizontal=True)
+        st.session_state.current_tab = tabs.index(current_tab)
+        
+        if current_tab == "Results Statement Clusters":
+            # Filter by Topic/Cluster with names
+            topics = sorted([t for t in df['Topic'].unique() if t != -1])  # Exclude cluster -1
+            topic_options = {int(topic): f"Cluster {topic}: {cluster_info[topic][0] if topic in cluster_info else 'Unnamed'}" 
+                           for topic in topics}
+            
+            selected_topic = st.selectbox(
+                "Select Results Statement Cluster",
+                topics,
+                format_func=lambda x: topic_options[int(x)]
+            )
+            
+            # Apply filters for Results Statement view
+            filtered_df_rs = df[df['Topic'] == selected_topic]
+            
+            # Display cluster info
+            if selected_topic in cluster_info:
+                cluster_name, keywords = cluster_info[selected_topic]
+                st.header(f"Cluster {selected_topic}: {cluster_name}")
+                st.markdown(f"**Top Keywords:** {keywords}")
+            else:
+                st.header(f"Cluster {selected_topic}")
+            
+            # Results Statement cluster statistics
+            st.subheader("Cluster Statistics")
+            rs_stats_cols = st.columns(4)
+            
+            with rs_stats_cols[0]:
+                st.metric("Total Entries", len(filtered_df_rs))
+            with rs_stats_cols[1]:
+                st.metric("Total INITs", filtered_df_rs['Source_File'].nunique())
+            with rs_stats_cols[2]:
+                st.metric("Result Types", filtered_df_rs['Result Type'].nunique())
+            with rs_stats_cols[3]:
+                st.metric("Work Packages", filtered_df_rs['WP Title'].nunique())
+            
+            # Show Results Statements
+            st.subheader("Result Statements")
+            display_cols = [
                 'Result Statement', 
                 'Result type (outcome or output)',
                 'Result Type', 
                 'Indicator',
-                'Type',
-                'Unit of measurement',
+                'Topic_Name',
                 'WP Title', 
                 'Source_File'
-            ]],
-            hide_index=True,
-            column_config={
-                "Result Statement": st.column_config.TextColumn("Result Statement", width="large"),
-                "Result type (outcome or output)": st.column_config.TextColumn("Outcome/Output", width="medium"),
-                "Result Type": st.column_config.TextColumn("Type", width="medium"),
-                "Indicator": st.column_config.TextColumn("Indicator", width="medium"),
-                "Type": st.column_config.TextColumn("Indicator Type", width="medium"),
-                "Unit of measurement": st.column_config.TextColumn("Unit", width="medium"),
-                "WP Title": st.column_config.TextColumn("Work Package", width="medium"),
-                "Source_File": st.column_config.TextColumn("INIT", width="medium")
-            }
-        )
-    
-    with col2:
-        # Help section
-        st.info("""
-        **How to use this dashboard:**
+            ]
+            display_cols = [col for col in display_cols if col in filtered_df_rs.columns]
+            st.dataframe(filtered_df_rs[display_cols], hide_index=True)
+            
+        else:  # Indicator Topics tab
+            # Show total number of indicators
+            total_unique_indicators = df['Indicator'].nunique()
+            total_topics = df['Topic_Name'].nunique()
+            
+            # Create two columns for the metrics
+            metric_cols = st.columns(3)
+            with metric_cols[0]:
+                st.metric("Total Unique Indicators", total_unique_indicators)
+            with metric_cols[1]:
+                st.metric("Total Topics", total_topics)
+            with metric_cols[2]:
+                avg_indicators_per_topic = round(total_unique_indicators / total_topics, 1)
+                st.metric("Average Indicators per Topic", avg_indicators_per_topic)
+            
+            # Filter by Indicator Topic
+            indicator_topics = sorted([str(topic) for topic in df['Topic_Name'].unique() if pd.notna(topic)])
+            selected_indicator_topic = st.selectbox(
+                "Select Indicator Topic",
+                indicator_topics
+            )
+            
+            # Apply filters for Indicator Topic view
+            filtered_df_it = df[df['Topic_Name'] == selected_indicator_topic]
+            
+            # Indicator topic statistics
+            st.subheader("Topic Statistics")
+            it_stats_cols = st.columns(4)
+            
+            with it_stats_cols[0]:
+                st.metric("Total Indicators", filtered_df_it['Indicator'].nunique())
+            with it_stats_cols[1]:
+                st.metric("Total INITs", filtered_df_it['Source_File'].nunique())
+            with it_stats_cols[2]:
+                st.metric("Result Types", filtered_df_it['Result Type'].nunique())
+            with it_stats_cols[3]:
+                st.metric("Work Packages", filtered_df_it['WP Title'].nunique())
+            
+            # Show Indicators and their context
+            st.subheader("Indicators in Topic")
+            display_cols = [
+                'Indicator',
+                'Result Statement',
+                'Result Type',
+                'WP Title',
+                'Source_File'
+            ]
+            display_cols = [col for col in display_cols if col in filtered_df_it.columns]
+            st.dataframe(filtered_df_it[display_cols].drop_duplicates(), hide_index=True)
         
-        1. Use the sidebar to select a specific cluster
-        2. Filter by Result Types if needed
-        3. Filter by INITs if needed
-        4. Filter by Indicators if needed
-        5. Explore the detailed results in the table
-        6. Scroll down to see overall statistics
-        """)
-    
-    # Clusters Overview Section
-    st.header("Clusters Overview")
-    
-    # Get cluster sizes (excluding -1)
-    cluster_sizes = df[df['Topic'] != -1]['Topic'].value_counts().sort_index()
-    
-    # Create overview data
-    overview_data = []
-    for topic in cluster_sizes.index:
-        if topic in cluster_info:
-            cluster_name, keywords = cluster_info[topic]
-            # Calculate indicators for this cluster
-            cluster_indicator_count = df[
-                (df['Topic'] == topic) & 
-                (df['Indicator'].notna())
-            ]['Indicator'].nunique()
-            overview_data.append({
-                'Cluster Number': f"Cluster {topic}",
-                'Name': cluster_name,
-                'Size': cluster_sizes[topic],
-                'Indicators': cluster_indicator_count,
-                'Keywords': keywords
-            })
-    
-    # Convert to DataFrame and display as table
-    overview_df = pd.DataFrame(overview_data)
-    
-    # Display the overview table with custom formatting
-    st.dataframe(
-        overview_df,
-        hide_index=True,
-        column_config={
-            "Cluster Number": st.column_config.TextColumn("Cluster", width="small"),
-            "Name": st.column_config.TextColumn("Name", width="medium"),
-            "Size": st.column_config.NumberColumn("Size", width="small"),
-            "Indicators": st.column_config.NumberColumn("Indicators", width="small"),
-            "Keywords": st.column_config.TextColumn("Top Keywords", width="large")
-        }
-    )
-    
-    # Additional Insights
-    col3, col4 = st.columns(2)
-    
-    with col3:
-        st.subheader("Result Types Across All Clusters")
-        result_types_all = df[df['Topic'] != -1]['Result Type'].value_counts()  # Exclude cluster -1
-        fig_all_types = px.pie(
-            values=result_types_all.values,
-            names=result_types_all.index,
-            title="Overall Distribution of Result Types"
+        # Sidebar filters (apply to both views)
+        st.sidebar.subheader("Global Filters")
+        
+        # Filter by Result Type
+        result_types = sorted(df['Result Type'].dropna().unique())
+        selected_result_type = st.sidebar.multiselect(
+            "Filter by Result Type",
+            result_types,
+            default=result_types[:3]
         )
-        st.plotly_chart(fig_all_types, use_container_width=True)
+
+        # Filter by INIT
+        sources = sorted(df['Source_File'].dropna().unique())
+        selected_sources = st.sidebar.multiselect(
+            "Filter by INIT",
+            sources,
+            default=[],
+            help="Select one or more INITs to filter the results"
+        )
+
+        # Filter by Indicator
+        indicators = sorted(df['Indicator'].dropna().unique())
+        selected_indicators = st.sidebar.multiselect(
+            "Filter by Indicator",
+            indicators,
+            default=[],
+            help="Select one or more indicators to filter the results"
+        )
+        
+        # Overall Statistics Section
+        st.header("Overall Statistics")
+        
+        # Create three columns for different visualizations
+        viz_col1, viz_col2, viz_col3 = st.columns(3)
+        
+        with viz_col1:
+            # Results Statement Clusters Overview
+            rs_cluster_sizes = df[df['Topic'] != -1]['Topic'].value_counts()
+            fig_rs_clusters = px.bar(
+                x=rs_cluster_sizes.values[:10],
+                y=[topic_options[idx] for idx in rs_cluster_sizes.index[:10]],
+                orientation='h',
+                title="Top 10 Results Statement Clusters"
+            )
+            fig_rs_clusters.update_layout(height=400)
+            st.plotly_chart(fig_rs_clusters, use_container_width=True)
+        
+        with viz_col2:
+            # Indicator Topics Overview
+            indicator_topic_sizes = df['Topic_Name'].value_counts()
+            fig_indicator_topics = px.bar(
+                x=indicator_topic_sizes.values[:10],
+                y=indicator_topic_sizes.index[:10],
+                orientation='h',
+                title="Top 10 Indicator Topics"
+            )
+            fig_indicator_topics.update_layout(height=400)
+            st.plotly_chart(fig_indicator_topics, use_container_width=True)
+        
+        with viz_col3:
+            # Result Types Distribution
+            result_type_dist = df['Result Type'].value_counts()
+            fig_result_types = px.pie(
+                values=result_type_dist.values,
+                names=result_type_dist.index,
+                title="Distribution of Result Types"
+            )
+            fig_result_types.update_layout(height=400)
+            st.plotly_chart(fig_result_types, use_container_width=True)
     
-    with col4:
-        st.subheader("Top Work Packages")
-        wp_counts = df[df['Topic'] != -1]['WP Title'].value_counts().head(10)  # Exclude cluster -1
-        fig_wp = px.bar(
-            x=wp_counts.values,
-            y=wp_counts.index,
-            orientation='h',
-            title="Top 10 Work Packages"
-        )
-        fig_wp.update_layout(
-            xaxis_title="Count",
-            yaxis_title="Work Package",
-            height=400
-        )
-        st.plotly_chart(fig_wp, use_container_width=True)
+    except Exception as e:
+        st.error(f"An error occurred: {str(e)}")
+        st.error("Please check the data format and try again.")
 
 if __name__ == "__main__":
     main()
