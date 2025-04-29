@@ -6,7 +6,6 @@ import plotly.graph_objects as go
 # Set page config
 st.set_page_config(
     page_title="ToCs Pathways Explorer",
-    page_title_align="center",
     layout="wide"
 )
 
@@ -14,24 +13,34 @@ st.set_page_config(
 @st.cache_data
 def load_data():
     df = pd.read_excel('outputs/ToCs_Clustered_2025-04-29T13-02_export.xlsx')
-    return df
+    cluster_names = pd.read_csv('outputs/ToCs_PathwaysNames.csv')
+    return df, cluster_names
 
 # Main function
 def main():
     st.title("ToCs Pathways Explorer")
     
     # Load data
-    df = load_data()
+    df, cluster_names = load_data()
+    
+    # Create a mapping of topic to cluster name and keywords
+    cluster_info = dict(zip(
+        cluster_names['Topic'],
+        zip(cluster_names['Cluster_Name'], cluster_names['Top Keywords'])
+    ))
     
     # Sidebar
     st.sidebar.header("Filters")
     
-    # Filter by Topic/Cluster
-    topics = sorted(df['Topic'].unique())
+    # Filter by Topic/Cluster with names
+    topics = sorted([t for t in df['Topic'].unique() if t != -1])  # Exclude cluster -1
+    topic_options = {topic: f"Cluster {topic}: {cluster_info[topic][0] if topic in cluster_info else 'Unnamed'}" 
+                    for topic in topics}
+    
     selected_topic = st.sidebar.selectbox(
         "Select Cluster/Topic",
         topics,
-        format_func=lambda x: f"Cluster {x}"
+        format_func=lambda x: topic_options[x]
     )
     
     # Filter by Result Type
@@ -49,10 +58,16 @@ def main():
     ]
     
     # Main content area - using columns for layout
-    col1, col2 = st.columns([2, 1])
+    col1, col2 = st.columns([3, 1])
     
     with col1:
-        st.header(f"Cluster {selected_topic} Analysis")
+        # Display cluster name and keywords
+        if selected_topic in cluster_info:
+            cluster_name, keywords = cluster_info[selected_topic]
+            st.header(f"Cluster {selected_topic}: {cluster_name}")
+            st.markdown(f"**Top Keywords:** {keywords}")
+        else:
+            st.header(f"Cluster {selected_topic}")
         
         # Cluster Statistics
         st.subheader("Cluster Statistics")
@@ -70,63 +85,79 @@ def main():
         # Result Statements Table
         st.subheader("Result Statements")
         st.dataframe(
-            filtered_df[['Result Statement', 'Result Type', 'WP Title', 'Source_File']],
+            filtered_df[[
+                'Result Statement', 
+                'Result type (outcome or output)',
+                'Result Type', 
+                'Indicator',
+                'Type',
+                'Unit of measurement',
+                'WP Title', 
+                'Source_File'
+            ]],
             hide_index=True,
             column_config={
                 "Result Statement": st.column_config.TextColumn("Result Statement", width="large"),
+                "Result type (outcome or output)": st.column_config.TextColumn("Outcome/Output", width="medium"),
                 "Result Type": st.column_config.TextColumn("Type", width="medium"),
+                "Indicator": st.column_config.TextColumn("Indicator", width="medium"),
+                "Type": st.column_config.TextColumn("Indicator Type", width="medium"),
+                "Unit of measurement": st.column_config.TextColumn("Unit", width="medium"),
                 "WP Title": st.column_config.TextColumn("Work Package", width="medium"),
                 "Source_File": st.column_config.TextColumn("Source", width="medium")
             }
         )
     
     with col2:
-        # Distribution of Result Types
-        st.subheader("Result Types Distribution")
-        result_type_counts = filtered_df['Result Type'].value_counts()
-        fig_types = px.pie(
-            values=result_type_counts.values,
-            names=result_type_counts.index,
-            title="Distribution of Result Types"
-        )
-        st.plotly_chart(fig_types, use_container_width=True)
+        # Help section
+        st.info("""
+        **How to use this dashboard:**
         
-        # Source Files Distribution
-        st.subheader("Source Files Distribution")
-        source_counts = filtered_df['Source_File'].value_counts()
-        fig_sources = px.bar(
-            x=source_counts.values,
-            y=source_counts.index,
-            orientation='h',
-            title="Number of Entries by Source"
-        )
-        fig_sources.update_layout(
-            xaxis_title="Count",
-            yaxis_title="Source File",
-            height=400
-        )
-        st.plotly_chart(fig_sources, use_container_width=True)
+        1. Use the sidebar to select a specific cluster
+        2. Filter by Result Types if needed
+        3. Explore the detailed results in the table
+        4. Scroll down to see overall statistics
+        """)
     
-    # Cluster Overview Section
+    # Clusters Overview Section
     st.header("Clusters Overview")
     
-    # Cluster sizes
-    cluster_sizes = df['Topic'].value_counts().sort_index()
-    fig_clusters = px.bar(
-        x=cluster_sizes.index,
-        y=cluster_sizes.values,
-        title="Size of Each Cluster",
-        labels={'x': 'Cluster', 'y': 'Number of Entries'}
+    # Get cluster sizes (excluding -1)
+    cluster_sizes = df[df['Topic'] != -1]['Topic'].value_counts().sort_index()
+    
+    # Create overview data
+    overview_data = []
+    for topic in cluster_sizes.index:
+        if topic in cluster_info:
+            cluster_name, keywords = cluster_info[topic]
+            overview_data.append({
+                'Cluster Number': f"Cluster {topic}",
+                'Name': cluster_name,
+                'Size': cluster_sizes[topic],
+                'Keywords': keywords
+            })
+    
+    # Convert to DataFrame and display as table
+    overview_df = pd.DataFrame(overview_data)
+    
+    # Display the overview table with custom formatting
+    st.dataframe(
+        overview_df,
+        hide_index=True,
+        column_config={
+            "Cluster Number": st.column_config.TextColumn("Cluster", width="small"),
+            "Name": st.column_config.TextColumn("Name", width="medium"),
+            "Size": st.column_config.NumberColumn("Size", width="small"),
+            "Keywords": st.column_config.TextColumn("Top Keywords", width="large")
+        }
     )
-    fig_clusters.update_layout(height=400)
-    st.plotly_chart(fig_clusters, use_container_width=True)
     
     # Additional Insights
     col3, col4 = st.columns(2)
     
     with col3:
         st.subheader("Result Types Across All Clusters")
-        result_types_all = df['Result Type'].value_counts()
+        result_types_all = df[df['Topic'] != -1]['Result Type'].value_counts()  # Exclude cluster -1
         fig_all_types = px.pie(
             values=result_types_all.values,
             names=result_types_all.index,
@@ -136,7 +167,7 @@ def main():
     
     with col4:
         st.subheader("Top Work Packages")
-        wp_counts = df['WP Title'].value_counts().head(10)
+        wp_counts = df[df['Topic'] != -1]['WP Title'].value_counts().head(10)  # Exclude cluster -1
         fig_wp = px.bar(
             x=wp_counts.values,
             y=wp_counts.index,
