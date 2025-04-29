@@ -30,6 +30,12 @@ def main():
         zip(cluster_names['Cluster_Name'], cluster_names['Top Keywords'])
     ))
     
+    # Calculate total indicators across all valid clusters
+    total_indicators = df[
+        (df['Topic'] != -1) & 
+        (df['Indicator'].notna())
+    ]['Indicator'].nunique()
+    
     # Sidebar
     st.sidebar.header("Filters")
     
@@ -60,6 +66,15 @@ def main():
         default=[],  # No default selection
         help="Select one or more INITs to filter the results"
     )
+
+    # Filter by Indicator
+    indicators = sorted(df['Indicator'].dropna().unique())
+    selected_indicators = st.sidebar.multiselect(
+        "Filter by Indicator",
+        indicators,
+        default=[],  # No default selection
+        help="Select one or more indicators to filter the results"
+    )
     
     # Apply filters
     filtered_df = df[
@@ -70,6 +85,10 @@ def main():
     # Apply source filter if any sources are selected
     if selected_sources:
         filtered_df = filtered_df[filtered_df['Source_File'].isin(selected_sources)]
+
+    # Apply indicator filter if any indicators are selected
+    if selected_indicators:
+        filtered_df = filtered_df[filtered_df['Indicator'].isin(selected_indicators)]
     
     # Main content area - using columns for layout
     col1, col2 = st.columns([3, 1])
@@ -85,7 +104,13 @@ def main():
         
         # Cluster Statistics
         st.subheader("Cluster Statistics")
-        stats_cols = st.columns(4)
+        stats_cols = st.columns(6)  # Increased number of columns
+        
+        # Calculate indicators in current cluster (before additional filters)
+        cluster_indicators = df[
+            (df['Topic'] == selected_topic) & 
+            (df['Indicator'].notna())
+        ]['Indicator'].nunique()
         
         with stats_cols[0]:
             st.metric("Total Entries", len(filtered_df))
@@ -95,6 +120,10 @@ def main():
             st.metric("Result Types", filtered_df['Result Type'].nunique())
         with stats_cols[3]:
             st.metric("Work Packages", filtered_df['WP Title'].nunique())
+        with stats_cols[4]:
+            st.metric("Indicators in Cluster", cluster_indicators)
+        with stats_cols[5]:
+            st.metric("Total Indicators (All Clusters)", total_indicators)
         
         # Result Statements Table
         st.subheader("Result Statements")
@@ -130,8 +159,9 @@ def main():
         1. Use the sidebar to select a specific cluster
         2. Filter by Result Types if needed
         3. Filter by INITs if needed
-        4. Explore the detailed results in the table
-        5. Scroll down to see overall statistics
+        4. Filter by Indicators if needed
+        5. Explore the detailed results in the table
+        6. Scroll down to see overall statistics
         """)
     
     # Clusters Overview Section
@@ -145,10 +175,16 @@ def main():
     for topic in cluster_sizes.index:
         if topic in cluster_info:
             cluster_name, keywords = cluster_info[topic]
+            # Calculate indicators for this cluster
+            cluster_indicator_count = df[
+                (df['Topic'] == topic) & 
+                (df['Indicator'].notna())
+            ]['Indicator'].nunique()
             overview_data.append({
                 'Cluster Number': f"Cluster {topic}",
                 'Name': cluster_name,
                 'Size': cluster_sizes[topic],
+                'Indicators': cluster_indicator_count,
                 'Keywords': keywords
             })
     
@@ -163,6 +199,7 @@ def main():
             "Cluster Number": st.column_config.TextColumn("Cluster", width="small"),
             "Name": st.column_config.TextColumn("Name", width="medium"),
             "Size": st.column_config.NumberColumn("Size", width="small"),
+            "Indicators": st.column_config.NumberColumn("Indicators", width="small"),
             "Keywords": st.column_config.TextColumn("Top Keywords", width="large")
         }
     )
