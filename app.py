@@ -90,7 +90,7 @@ def main():
         with stats_cols[0]:
             st.metric("Total Entries", len(filtered_df))
         with stats_cols[1]:
-            st.metric("Unique Sources", filtered_df['Source_File'].nunique())
+            st.metric("Total INITs", filtered_df['Source_File'].nunique())
         with stats_cols[2]:
             st.metric("Result Types", filtered_df['Result Type'].nunique())
         with stats_cols[3]:
